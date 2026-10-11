@@ -1,0 +1,6 @@
+{
+  "name": "MovieRecap AI Studio - ရုပ်ရှင် Recap အလိုအလျောက်ဖန်တီးစနစ်",
+  "description": "Automated Movie Recap Workflow Studio with AI script generation in Burmese and English, voiceover narration, anti-copyright mirror & freeze-frame filter, timeline sync, and MP4/MP3 export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
