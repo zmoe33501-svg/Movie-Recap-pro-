@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Film,
   UploadCloud,
@@ -23,7 +23,8 @@ import {
   Music,
   Smartphone,
   Type,
-  Languages
+  Languages,
+  Key // Added Key icon for API settings
 } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { VideoUploader } from './components/VideoUploader';
@@ -54,6 +55,25 @@ export default function App() {
   const [uiLang, setUiLang] = useState<'my' | 'en'>('my');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  // --- API Key Settings State (New) ---
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+
+  // Load saved API Key on startup
+  useEffect(() => {
+    const savedKey = localStorage.getItem('user_gemini_key');
+    if (savedKey) {
+      setApiKeyInput(savedKey);
+    }
+  }, []);
+
+  const handleSaveApiKey = () => {
+    localStorage.setItem('user_gemini_key', apiKeyInput.trim());
+    setIsApiKeyModalOpen(false);
+    alert(uiLang === 'my' ? 'API Key အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ!' : 'API Key saved successfully!');
+  };
+  // ------------------------------------
 
   // Workflow current active step (1 to 6)
   const [activeWorkflowStep, setActiveWorkflowStep] = useState<number>(1);
@@ -132,10 +152,10 @@ export default function App() {
 
   // Anti-Copyright Protection Settings
   const [antiCopyright, setAntiCopyright] = useState<AntiCopyrightSettings>({
-    flipHorizontal: true, // (5) မူရင်း video ကို ဘယ်ညာပြောင်း
-    freezeIntervalSec: 5, // (5) ၅ စက္ကန့်ခြားစီကို freeze လုပ်ပေးပါ
+    flipHorizontal: true,
+    freezeIntervalSec: 5,
     freezeDurationSec: 0.8,
-    muteOriginalAudio: true, // (6) မူရင်းအသံ ဖျောက်မည်
+    muteOriginalAudio: true,
     subtitlesEnabled: true,
     filmGrainOverlay: false,
     colorGradeFilter: 'none',
@@ -662,6 +682,66 @@ export default function App() {
           <AdminDashboard uiLang={uiLang} />
         )}
       </main>
+
+      {/* API Key Modal (New Feature) */}
+      {isApiKeyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl relative">
+            <h2 className="text-xl font-bold text-white flex items-center space-x-2 mb-4">
+              <Key className="w-5 h-5 text-rose-500" />
+              <span>{uiLang === 'my' ? 'API Key သတ်မှတ်ရန်' : 'Set Gemini API Key'}</span>
+            </h2>
+            
+            <p className="text-sm text-slate-300 mb-4 leading-relaxed">
+              {uiLang === 'my' 
+                ? 'Website တွင် ဘာသာပြန်ခြင်းကို အခမဲ့ အသုံးပြုနိုင်ရန် သင်၏ ကိုယ်ပိုင် Google Gemini API Key ကို ထည့်သွင်းပေးပါ။'
+                : 'Enter your personal Google Gemini API Key to use the translation and AI features for free.'}
+            </p>
+
+            <input
+              type="text"
+              placeholder="AIzaSyB-xxxxxxxxxxxxxxx"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 mb-3"
+            />
+
+            <a 
+              href="https://aistudio.google.com/app/apikey" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-xs text-rose-400 hover:text-rose-300 underline block mb-6"
+            >
+              {uiLang === 'my' ? '>> API Key အခမဲ့ ရယူရန် ဤနေရာကို နှိပ်ပါ <<' : '>> Click here to get a FREE API Key <<'}
+            </a>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                onClick={() => setIsApiKeyModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
+              >
+                {uiLang === 'my' ? 'ပိတ်မည်' : 'Cancel'}
+              </button>
+              <button
+                onClick={handleSaveApiKey}
+                className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-rose-600 hover:bg-rose-500 transition-colors shadow-lg"
+              >
+                {uiLang === 'my' ? 'သိမ်းဆည်းမည် (Save)' : 'Save Key'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating API Key Setup Trigger (New) */}
+      <button
+        onClick={() => setIsApiKeyModalOpen(true)}
+        className="fixed bottom-5 left-5 z-40 px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm flex items-center space-x-2 shadow-2xl transition-all border border-slate-700"
+        title="Settings"
+      >
+        <Key className="w-4 h-4 text-amber-500" />
+        <span>{uiLang === 'my' ? 'API Key ထည့်ရန်' : 'Setup API Key'}</span>
+      </button>
 
       {/* Export / Download Modal (Requirement 7) */}
       <ExportModal
