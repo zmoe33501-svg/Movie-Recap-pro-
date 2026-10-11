@@ -72,15 +72,29 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
   const currentVoice = VOICES.find((v) => v.id === selectedVoiceId) || VOICES[0];
   const currentEmotion = EMOTIONS.find((e) => e.id === selectedEmotionId) || EMOTIONS[7];
 
+  // Helper to get API Key from LocalStorage
+  const getApiKey = () => {
+    return localStorage.getItem('user_gemini_key') || '';
+  };
+
   // 1. Transcribe Original Dialogue from Video & Translate
   const handleAutoTranscribeVideo = async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      alert(uiLang === 'my' ? 'ကျေးဇူးပြု၍ ဘယ်ဘက်အောက်ထောင့်ရှိ "API Key ထည့်ရန်" ကိုနှိပ်ပြီး API Key အရင်ထည့်ပါ။' : 'Please click "Setup API Key" at the bottom left first.');
+      return;
+    }
+
     setIsTranscribing(true);
     setNoticeMessage(null);
 
     try {
       const response = await fetch('/api/video/transcribe-and-translate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-gemini-api-key': apiKey // Send user's API Key
+        },
         body: JSON.stringify({
           videoTitle: video.name,
           duration: video.duration || 30,
@@ -96,9 +110,12 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
             ? `✓ ဗီဒီယိုမှ မူရင်းစကားပြောစာသား (${data.segments.length} ကြောင်း) ကို အောင်မြင်စွာ ထုတ်ယူပြီး ဘာသာပြန်ဆိုပြီးပါပြီ!`
             : `✓ Successfully extracted & translated ${data.segments.length} speech segments from video!`
         );
+      } else {
+         alert(uiLang === 'my' ? 'ဘာသာပြန်ရာတွင် အခက်အခဲရှိနေပါသည်။ API Key မှန်ကန်မှုရှိမရှိ ပြန်စစ်ပါ။' : 'Failed to translate. Please check if your API Key is correct.');
       }
     } catch (err: any) {
       console.error(err);
+      alert(uiLang === 'my' ? 'ချိတ်ဆက်မှု ပြဿနာရှိနေပါသည်။' : 'Connection Error.');
     } finally {
       setIsTranscribing(false);
     }
@@ -115,13 +132,22 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
       return;
     }
 
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      alert(uiLang === 'my' ? 'ကျေးဇူးပြု၍ ဘယ်ဘက်အောက်ထောင့်ရှိ "API Key ထည့်ရန်" ကိုနှိပ်ပြီး API Key အရင်ထည့်ပါ။' : 'Please click "Setup API Key" at the bottom left first.');
+      return;
+    }
+
     setIsSyncingVoices(true);
     setNoticeMessage(null);
 
     try {
       const response = await fetch('/api/video/sync-voiceover-segments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-gemini-api-key': apiKey // Send user's API Key
+        },
         body: JSON.stringify({
           segments,
           voice: selectedVoiceId,
@@ -146,9 +172,12 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
             ? `✓ "${currentVoice.name}" ၏ လူသံစစ်စစ်ဖြင့် ဗီဒီယို စကားပြောချိန်နှင့် တစ်ထပ်တည်းကျ အသံသွင်းပြီးပါပြီ!`
             : `✓ Synchronized voiceover with video timing using ${currentVoice.name}'s natural human voice!`
         );
+      } else {
+         alert(uiLang === 'my' ? 'အသံသွင်းရာတွင် အခက်အခဲရှိနေပါသည်။ API Key ကို ပြန်စစ်ပါ။' : 'Failed to generate voice. Please check API Key.');
       }
     } catch (err: any) {
       console.error(err);
+      alert(uiLang === 'my' ? 'ချိတ်ဆက်မှု ပြဿနာရှိနေပါသည်။' : 'Connection Error.');
     } finally {
       setIsSyncingVoices(false);
     }
