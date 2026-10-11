@@ -3,22 +3,14 @@ import {
   FileVideo,
   Languages,
   Mic,
-  Play,
-  Pause,
-  Sliders,
-  Sparkles,
-  CheckCircle2,
   RotateCcw,
   Volume2,
   Image as ImageIcon,
-  Eye,
-  Type,
-  AlignVerticalJustifyCenter,
+  CheckCircle2,
+  Sparkles,
+  Sliders,
   Layers,
-  Shield,
-  HelpCircle,
-  Plus,
-  Trash2,
+  Type,
   Edit3
 } from 'lucide-react';
 import {
@@ -29,9 +21,68 @@ import {
   VideoIconSettings,
   VOICES,
   EMOTIONS,
-  VoiceProfile,
-  EmotionProfile
 } from '../types/recap';
+
+// --- (NEW) Audio Extraction Helpers ---
+// ဗီဒီယိုထဲက အသံကို ဆွဲထုတ်ပြီး AI နားလည်တဲ့ ဖော်မတ်ပြောင်းပေးမည့် စနစ်
+async function extractAudioBase64(videoUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(videoUrl);
+    const blob = await res.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioContextClass({ sampleRate: 16000 }); // Low sample rate for faster processing
+    
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const channelData = audioBuffer.getChannelData(0); // Downmix to Mono
+    
+    const wavBuffer = encodeWAV(channelData, 16000);
+    return arrayBufferToBase64(wavBuffer);
+  } catch (e) {
+    console.error("Audio extraction failed:", e);
+    return null;
+  }
+}
+
+function encodeWAV(samples: Float32Array, sampleRate: number) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeString = (view: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
+  };
+  
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); 
+  view.setUint16(22, 1, true); 
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buffer;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+// --------------------------------------
 
 interface VideoDubbingTranslatorProps {
   video: VideoMetadata;
@@ -72,7 +123,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
   const currentVoice = VOICES.find((v) => v.id === selectedVoiceId) || VOICES[0];
   const currentEmotion = EMOTIONS.find((e) => e.id === selectedEmotionId) || EMOTIONS[7];
 
-  // Helper to get API Key from LocalStorage
   const getApiKey = () => {
     return localStorage.getItem('user_gemini_key') || '';
   };
@@ -85,17 +135,34 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
       return;
     }
 
+    if (!video.url) {
+      alert(uiLang === 'my' ? 'ဗီဒီယို ဖိုင်ရှာမတွေ့ပါ။ ဗီဒီယိုအရင်တင်ပါ။' : 'Video file not found.');
+      return;
+    }
+
     setIsTranscribing(true);
-    setNoticeMessage(null);
+    setNoticeMessage(uiLang === 'my' ? 'ဗီဒီယိုထဲမှ အသံကို ခွဲထုတ်နေပါသည် (စက္ကန့်အနည်းငယ် ကြာနိုင်သည်)...' : 'Extracting audio from video...');
 
     try {
+      // (NEW) Extract audio before calling API
+      const extractedAudioBase64 = await extractAudioBase64(video.url);
+      
+      if (!extractedAudioBase64) {
+         alert(uiLang === 'my' ? 'ဗီဒီယိုထဲမှ အသံကို ခွဲထုတ်၍ မရပါ။' : 'Failed to extract audio.');
+         setIsTranscribing(false);
+         return;
+      }
+
+      setNoticeMessage(uiLang === 'my' ? 'AI ဆီသို့ပို့ဆောင်၍ ဘာသာပြန်နေပါသည်...' : 'Sending to AI for translation...');
+
       const response = await fetch('/api/video/transcribe-and-translate', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-gemini-api-key': apiKey // Send user's API Key
+          'x-gemini-api-key': apiKey
         },
         body: JSON.stringify({
+          audioBase64: extractedAudioBase64, // ပျောက်နေတဲ့ အသံဖိုင်ကို ပို့ပေးလိုက်ပါပြီ
           videoTitle: video.name,
           duration: video.duration || 30,
           targetLang,
@@ -107,15 +174,17 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
         onSegmentsChange(data.segments);
         setNoticeMessage(
           uiLang === 'my'
-            ? `✓ ဗီဒီယိုမှ မူရင်းစကားပြောစာသား (${data.segments.length} ကြောင်း) ကို အောင်မြင်စွာ ထုတ်ယူပြီး ဘာသာပြန်ဆိုပြီးပါပြီ!`
-            : `✓ Successfully extracted & translated ${data.segments.length} speech segments from video!`
+            ? `✓ မူရင်းစကားပြောစာသား (${data.segments.length} ကြောင်း) ကို အောင်မြင်စွာ ထုတ်ယူပြီး ဘာသာပြန်ဆိုပြီးပါပြီ!`
+            : `✓ Successfully extracted & translated ${data.segments.length} speech segments!`
         );
       } else {
-         alert(uiLang === 'my' ? 'ဘာသာပြန်ရာတွင် အခက်အခဲရှိနေပါသည်။ API Key မှန်ကန်မှုရှိမရှိ ပြန်စစ်ပါ။' : 'Failed to translate. Please check if your API Key is correct.');
+         alert(uiLang === 'my' ? 'ဘာသာပြန်ရာတွင် အခက်အခဲရှိနေပါသည်။ API Key ပြန်စစ်ပါ။' : 'Translation failed. Check API Key.');
+         setNoticeMessage(null);
       }
     } catch (err: any) {
       console.error(err);
       alert(uiLang === 'my' ? 'ချိတ်ဆက်မှု ပြဿနာရှိနေပါသည်။' : 'Connection Error.');
+      setNoticeMessage(null);
     } finally {
       setIsTranscribing(false);
     }
@@ -146,7 +215,7 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-gemini-api-key': apiKey // Send user's API Key
+          'x-gemini-api-key': apiKey 
         },
         body: JSON.stringify({
           segments,
@@ -161,7 +230,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
       if (data.success && Array.isArray(data.segments)) {
         onSegmentsChange(data.segments);
 
-        // Find first valid audio URL to notify player
         const firstAudio = data.segments.find((s: any) => s.audioUrl)?.audioUrl;
         if (firstAudio) {
           onSyncVoiceoverComplete(firstAudio);
@@ -183,7 +251,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
     }
   };
 
-  // Play preview of single segment audio
   const handlePlaySegmentPreview = (seg: VideoSpeechSegment) => {
     if (!seg.audioUrl) return;
     const a = new Audio(seg.audioUrl);
@@ -192,7 +259,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
     a.play().catch(() => setPlayingSegmentId(null));
   };
 
-  // Update line text inline
   const handleUpdateSegmentTranslation = (id: string, newText: string) => {
     const updated = segments.map((s) => {
       if (s.id === id) {
@@ -205,7 +271,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
     onSegmentsChange(updated);
   };
 
-  // Custom Image Upload for Video Icon
   const handleIconFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -224,7 +289,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
 
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 sm:p-6 backdrop-blur-xl shadow-2xl space-y-6">
-      {/* Header and Workflow Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
           <h3 className="text-base sm:text-lg font-bold text-slate-100 flex items-center space-x-2">
@@ -242,7 +306,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
           </p>
         </div>
 
-        {/* Tab Switcher */}
         <div className="flex items-center space-x-1 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-semibold">
           <button
             onClick={() => setActiveTab('transcribe')}
@@ -325,7 +388,7 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
               {isTranscribing ? (
                 <>
                   <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{uiLang === 'my' ? 'မူရင်းစာသား ထုတ်ယူနေသည်...' : 'Extracting Dialogue...'}</span>
+                  <span>{uiLang === 'my' ? 'အသံထုတ်ယူ ဘာသာပြန်နေသည်...' : 'Extracting & Translating...'}</span>
                 </>
               ) : (
                 <>
@@ -430,7 +493,7 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
               </span>
             </div>
 
-            {/* Quick 20 Voices select */}
+            {/* Quick Voices select */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-1">
               {VOICES.map((v) => {
                 const isSelected = selectedVoiceId === v.id;
@@ -507,7 +570,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
       {/* TAB 3: CUSTOM SUBTITLES, BACKGROUND BLUR & VIDEO ICON */}
       {activeTab === 'visuals' && (
         <div className="space-y-6">
-          {/* 1. BACKGROUND BLUR POSITIONING */}
           <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-200 flex items-center space-x-2">
@@ -551,212 +613,21 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
                     </button>
                   ))}
                 </div>
-
-                {/* Blur Box Y Position & Height for Custom Box / Bottom Bar */}
-                {(blurSettings.position === 'custom-box' || blurSettings.position === 'bottom-bar') && (
-                  <div className="grid grid-cols-2 gap-3 pt-2 text-xs">
-                    <div>
-                      <div className="flex justify-between text-slate-400 mb-1">
-                        <span>{uiLang === 'my' ? 'ဝါးမည့်နေရာ အမြင့် (Y Position)' : 'Y Position'}:</span>
-                        <span className="text-cyan-400 font-mono">{blurSettings.boxY}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="90"
-                        value={blurSettings.boxY}
-                        onChange={(e) =>
-                          onBlurSettingsChange({ ...blurSettings, boxY: parseInt(e.target.value) })
-                        }
-                        className="w-full accent-cyan-500"
-                      />
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-slate-400 mb-1">
-                        <span>{uiLang === 'my' ? 'ဝါးမည့် အကွက်အထူ (Height)' : 'Blur Height'}:</span>
-                        <span className="text-cyan-400 font-mono">{blurSettings.boxHeight}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="10"
-                        max="50"
-                        value={blurSettings.boxHeight}
-                        onChange={(e) =>
-                          onBlurSettingsChange({ ...blurSettings, boxHeight: parseInt(e.target.value) })
-                        }
-                        className="w-full accent-cyan-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Blur Intensity Slider */}
-                <div className="pt-1 text-xs">
-                  <div className="flex justify-between text-slate-400 mb-1">
-                    <span>{uiLang === 'my' ? 'ဝါးသည့် အတိုင်းအတာ (Blur Strength)' : 'Blur Strength'}:</span>
-                    <span className="text-cyan-400 font-mono">{blurSettings.blurPx}px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="4"
-                    max="30"
-                    value={blurSettings.blurPx}
-                    onChange={(e) =>
-                      onBlurSettingsChange({ ...blurSettings, blurPx: parseInt(e.target.value) })
-                    }
-                    className="w-full accent-cyan-500"
-                  />
-                </div>
               </div>
             )}
           </div>
-
-          {/* 2. VIDEO ICON / CHANNEL LOGO / BADGE CUSTOMIZATION */}
-          <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-slate-200 flex items-center space-x-2">
-                <ImageIcon className="w-4 h-4 text-amber-400" />
-                <span>
-                  {uiLang === 'my'
-                    ? 'Video Icon / Channel Logo စိတ်ကြိုက်ထည့်သွင်းခြင်း (Video Badge)'
-                    : 'Video Icon & Channel Badge'}
-                </span>
-              </label>
-              <input
-                type="checkbox"
-                checked={iconSettings.enabled}
-                onChange={(e) => onIconSettingsChange({ ...iconSettings, enabled: e.target.checked })}
-                className="w-4 h-4 text-rose-600 rounded bg-slate-900 border-slate-700"
-              />
-            </div>
-
-            {iconSettings.enabled && (
-              <div className="space-y-4 pt-2 text-xs">
-                {/* Preset Badges or Upload */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {[
-                    { id: 'recap-hd', label: '🎬 RECAP HD' },
-                    { id: 'pro-4k', label: '💎 4K ULTRA' },
-                    { id: 'vip-channel', label: '★ VIP CHANNEL' },
-                    { id: 'verified', label: '✓ VERIFIED' },
-                    { id: 'fire', label: '🔥 TRENDING' },
-                  ].map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() =>
-                        onIconSettingsChange({
-                          ...iconSettings,
-                          type: 'preset',
-                          preset: b.id as any,
-                        })
-                      }
-                      className={`px-3 py-1.5 rounded-lg border font-bold transition-all ${
-                        iconSettings.type === 'preset' && iconSettings.preset === b.id
-                          ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {b.label}
-                    </button>
-                  ))}
-
-                  {/* Upload custom icon button */}
-                  <label className="px-3 py-1.5 rounded-lg border border-dashed border-slate-700 hover:border-amber-400 bg-slate-900 text-slate-300 cursor-pointer flex items-center space-x-1.5 font-bold transition-all">
-                    <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{uiLang === 'my' ? 'ကိုယ်ပိုင် Logo တင်မည် (PNG/JPG)' : 'Upload Custom Logo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleIconFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-
-                {/* Position selection */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {[
-                    { id: 'top-left', label: 'အပေါ် ဘယ်ဘက် (Top-Left)' },
-                    { id: 'top-right', label: 'အပေါ် ညာဘက် (Top-Right)' },
-                    { id: 'bottom-left', label: 'အောက် ဘယ်ဘက် (Bottom-Left)' },
-                    { id: 'bottom-right', label: 'အောက် ညာဘက် (Bottom-Right)' },
-                  ].map((pos) => (
-                    <button
-                      key={pos.id}
-                      type="button"
-                      onClick={() =>
-                        onIconSettingsChange({ ...iconSettings, position: pos.id as any })
-                      }
-                      className={`p-2 rounded-lg border text-left font-semibold transition-all ${
-                        iconSettings.position === pos.id
-                          ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-                          : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {pos.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Size & Opacity */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="flex justify-between text-slate-400 mb-1">
-                      <span>{uiLang === 'my' ? 'Icon အရွယ်အစား (Size)' : 'Icon Size'}:</span>
-                      <span className="text-amber-400 font-mono">{iconSettings.size}px</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="24"
-                      max="100"
-                      value={iconSettings.size}
-                      onChange={(e) =>
-                        onIconSettingsChange({ ...iconSettings, size: parseInt(e.target.value) })
-                      }
-                      className="w-full accent-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-slate-400 mb-1">
-                      <span>{uiLang === 'my' ? 'ကြည်လင်မှု (Opacity)' : 'Opacity'}:</span>
-                      <span className="text-amber-400 font-mono">
-                        {Math.round(iconSettings.opacity * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0.2"
-                      max="1.0"
-                      step="0.05"
-                      value={iconSettings.opacity}
-                      onChange={(e) =>
-                        onIconSettingsChange({
-                          ...iconSettings,
-                          opacity: parseFloat(e.target.value),
-                        })
-                      }
-                      className="w-full accent-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 3. SUBTITLE STYLING & POSITIONING */}
+          
           <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
             <label className="text-xs font-bold text-slate-200 flex items-center space-x-2">
               <Type className="w-4 h-4 text-rose-400" />
               <span>
                 {uiLang === 'my'
-                  ? 'စာတန်းထိုး အရောင်၊ အရွယ်အစားနှင့် ထားရှိမည့် နေရာ (Subtitle Customization)'
-                  : 'Subtitle Customization & Y Position'}
+                  ? 'စာတန်းထိုး အရောင်၊ အရွယ်အစားနှင့် ထားရှိမည့် နေရာ'
+                  : 'Subtitle Customization'}
               </span>
             </label>
 
             <div className="space-y-4 pt-2 text-xs">
-              {/* Color Presets */}
               <div className="flex items-center space-x-2">
                 <span className="text-slate-400">{uiLang === 'my' ? 'စာတန်းထိုး အရောင်:' : 'Color'}:</span>
                 {[
@@ -764,7 +635,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
                   { id: 'white', hex: '#ffffff', label: 'အဖြူ' },
                   { id: 'cyan', hex: '#38bdf8', label: 'အပြာနု' },
                   { id: 'green', hex: '#4ade80', label: 'အစိမ်း' },
-                  { id: 'pink', hex: '#fb7185', label: 'ပန်းရောင်' },
                 ].map((c) => (
                   <button
                     key={c.id}
@@ -782,52 +652,6 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
                     <span>{c.label}</span>
                   </button>
                 ))}
-              </div>
-
-              {/* Subtitle Y Position Slider */}
-              <div>
-                <div className="flex justify-between text-slate-400 mb-1">
-                  <span>{uiLang === 'my' ? 'စာတန်းထိုး ထားမည့် နေရာ (Y Position)' : 'Subtitle Position'}:</span>
-                  <span className="text-rose-400 font-mono">
-                    {subtitleSettings.customYPercent || 82}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="15"
-                  max="90"
-                  value={subtitleSettings.customYPercent || 82}
-                  onChange={(e) =>
-                    onSubtitleSettingsChange({
-                      ...subtitleSettings,
-                      position: 'custom',
-                      customYPercent: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full accent-rose-500"
-                />
-              </div>
-
-              {/* Boxed Backdrop options */}
-              <div className="flex items-center space-x-3">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={subtitleSettings.boxedBackground}
-                    onChange={(e) =>
-                      onSubtitleSettingsChange({
-                        ...subtitleSettings,
-                        boxedBackground: e.target.checked,
-                      })
-                    }
-                    className="w-4 h-4 text-rose-600 rounded bg-slate-900 border-slate-700"
-                  />
-                  <span className="text-slate-300 font-medium">
-                    {uiLang === 'my'
-                      ? 'စာတန်းထိုး အနောက်ခံ အနက်ကွက် ထည့်မည် (Dark Pill Box for Clear Readability)'
-                      : 'High Contrast Backdrop Box'}
-                  </span>
-                </label>
               </div>
             </div>
           </div>
