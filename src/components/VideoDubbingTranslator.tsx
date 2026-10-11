@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   FileVideo, Languages, Mic, RotateCcw, Volume2, Image as ImageIcon,
-  CheckCircle2, Sparkles, Sliders, Layers, Type, Edit3, ArrowUp, ArrowDown, ArrowLeft, ArrowRight
+  CheckCircle2, Sparkles, Sliders, Layers, Type, Edit3, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Move
 } from 'lucide-react';
 import {
   VideoMetadata, VideoSpeechSegment, SubtitleSettings, BlurSettings, VideoIconSettings, VOICES, EMOTIONS,
@@ -212,7 +212,7 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
                 </select>
 
                 {blurSettings.position === 'custom-box' && (
-                  <div className="flex items-center justify-between bg-slate-900/50 p-2 rounded-xl">
+                  <div className="flex flex-wrap items-center justify-center gap-4 bg-slate-900/50 p-2 rounded-xl">
                     <DPadControl label="နေရာရွှေ့ရန်" onMove={(dx, dy) => onBlurSettingsChange({ ...blurSettings, boxX: Math.max(0, (blurSettings.boxX || 0) + dx), boxY: Math.max(0, (blurSettings.boxY || 0) + dy) })} />
                     <DPadControl label="အရွယ်အစား (Size)" onMove={(dx, dy) => onBlurSettingsChange({ ...blurSettings, boxWidth: Math.max(10, (blurSettings.boxWidth || 100) + dx), boxHeight: Math.max(10, (blurSettings.boxHeight || 25) + dy) })} />
                   </div>
