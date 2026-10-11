@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
-import { Play, Pause, RotateCcw, Volume2, ShieldCheck, Zap, Music, Smartphone, Move, Maximize, Minimize } from 'lucide-react';
+import { Play, Pause, RotateCcw, ShieldCheck, Zap, Music, Smartphone, Maximize, Minimize } from 'lucide-react';
 import {
   AntiCopyrightSettings,
   ScriptData,
@@ -12,6 +12,27 @@ import {
   AspectRatioType
 } from '../types/recap';
 import { createCinematicBgmBuffer, audioBufferToWavBlob } from '../utils/audioExporter';
+
+// --- HELPER FUNCTION: Auto Word Wrap for long subtitles ---
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const words = text.split(' ');
+  const lines = [];
+  let currentLine = words[0];
+
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i];
+    const width = ctx.measureText(currentLine + ' ' + word).width;
+    if (width < maxWidth) {
+      currentLine += ' ' + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  lines.push(currentLine);
+  return lines;
+}
+// --------------------------------------------------------
 
 export interface RecapVideoPlayerRef {
   getCanvas: () => HTMLCanvasElement | null;
@@ -34,35 +55,16 @@ interface RecapVideoPlayerProps {
   blurSettings?: BlurSettings;
   iconSettings?: VideoIconSettings;
   speechSegments?: VideoSpeechSegment[];
-  targetDubLanguage?: 'my' | 'en';
   aspectRatio: AspectRatioType;
   uiLang: 'my' | 'en';
   onTimeUpdate?: (currentTime: number, duration: number) => void;
-  
-  onUpdateSubtitleSettings?: (settings: SubtitleSettings) => void;
-  onUpdateIconSettings?: (settings: VideoIconSettings) => void;
-  onUpdateBlurSettings?: (settings: BlurSettings) => void;
 }
 
 export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayerProps>(
   (
     {
-      video,
-      script,
-      antiCopyright,
-      voiceoverAudioUrl,
-      bgmSettings,
-      subtitleSettings,
-      blurSettings,
-      iconSettings,
-      speechSegments,
-      targetDubLanguage = 'my',
-      aspectRatio,
-      uiLang,
-      onTimeUpdate,
-      onUpdateSubtitleSettings,
-      onUpdateIconSettings,
-      onUpdateBlurSettings,
+      video, script, antiCopyright, voiceoverAudioUrl, bgmSettings, subtitleSettings,
+      blurSettings, iconSettings, speechSegments, aspectRatio, uiLang, onTimeUpdate
     },
     ref
   ) => {
@@ -73,7 +75,7 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
     const customIconImgRef = useRef<HTMLImageElement | null>(null);
 
     const [videoSize, setVideoSize] = useState({ width: 1280, height: 720 });
-    const [isFullscreen, setIsFullscreen] = useState(false); // NEW: Fullscreen state
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const lastRenderTimeRef = useRef<number>(0);
     const targetFPS = 30; 
@@ -84,24 +86,7 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
     const [duration, setDuration] = useState(video.duration || 30);
     const [isFreezing, setIsFreezing] = useState(false);
     const [activeSubtitle, setActiveSubtitle] = useState<{ burmese: string; english: string } | null>(null);
-    const [voiceVolume, setVoiceVolume] = useState(1);
     const [bgmAudioUrl, setBgmAudioUrl] = useState<string | null>(null);
-
-    const [dragState, setDragState] = useState<{
-      item: 'none' | 'logo' | 'subtitle' | 'blur-box' | 'blur-resize';
-      startX: number;
-      startY: number;
-      initialValX: number;
-      initialValY: number;
-    }>({ item: 'none', startX: 0, startY: 0, initialValX: 0, initialValY: 0 });
-
-    const [localSubtitle, setLocalSubtitle] = useState<SubtitleSettings>(subtitleSettings);
-    const [localIcon, setLocalIcon] = useState<VideoIconSettings>(iconSettings || {} as VideoIconSettings);
-    const [localBlur, setLocalBlur] = useState<BlurSettings>(blurSettings || {} as BlurSettings);
-
-    useEffect(() => { setLocalSubtitle(subtitleSettings); }, [subtitleSettings]);
-    useEffect(() => { setLocalIcon(iconSettings || {} as VideoIconSettings); }, [iconSettings]);
-    useEffect(() => { setLocalBlur(blurSettings || {} as BlurSettings); }, [blurSettings]);
 
     const lastFreezeCheckRef = useRef<number>(-1);
     const freezeTimeoutRef = useRef<any>(null);
@@ -116,24 +101,16 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
         const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
         const buffer = createCinematicBgmBuffer(audioCtx, bgmSettings.track as any, 50);
         const wav = audioBufferToWavBlob(buffer);
-        const url = URL.createObjectURL(wav);
-        setBgmAudioUrl(url);
-        if (bgmAudioRef.current) {
-          bgmAudioRef.current.src = url;
-          bgmAudioRef.current.volume = bgmSettings.volume;
-        }
-      } catch (err) {
-        console.error('BGM Error:', err);
-      }
+        setBgmAudioUrl(URL.createObjectURL(wav));
+        if (bgmAudioRef.current) bgmAudioRef.current.volume = bgmSettings.volume;
+      } catch (err) {}
     }, [bgmSettings.track, bgmSettings.enabled]);
 
     useEffect(() => {
       if (!bgmAudioRef.current) return;
-      if (bgmSettings.autoDucking && voiceoverAudioUrl && isPlaying && !isFreezing) {
-        bgmAudioRef.current.volume = Math.max(0.04, bgmSettings.volume * 0.35);
-      } else {
-        bgmAudioRef.current.volume = bgmSettings.volume;
-      }
+      bgmAudioRef.current.volume = (bgmSettings.autoDucking && voiceoverAudioUrl && isPlaying && !isFreezing) 
+        ? Math.max(0.04, bgmSettings.volume * 0.35) 
+        : bgmSettings.volume;
     }, [bgmSettings.volume, bgmSettings.autoDucking, voiceoverAudioUrl, isPlaying, isFreezing]);
 
     useImperativeHandle(ref, () => ({
@@ -168,14 +145,14 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
     }));
 
     useEffect(() => {
-      if (iconSettings?.customImageUrl) {
+      if (iconSettings?.type === 'custom' && iconSettings?.customImageUrl) {
         const img = new Image();
         img.src = iconSettings.customImageUrl;
         img.onload = () => { customIconImgRef.current = img; };
       } else {
         customIconImgRef.current = null;
       }
-    }, [iconSettings?.customImageUrl]);
+    }, [iconSettings?.customImageUrl, iconSettings?.type]);
 
     useEffect(() => {
       if (speechSegments && speechSegments.length > 0) {
@@ -186,41 +163,30 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
         }
       }
       if (!script || !script.scenes || script.scenes.length === 0) {
-        setActiveSubtitle(null);
-        return;
+        setActiveSubtitle(null); return;
       }
       const activeScene = script.scenes.find((s) => currentTime >= s.startSec && currentTime < s.endSec);
       if (activeScene) {
         setActiveSubtitle({ burmese: activeScene.narrationBurmese, english: activeScene.narrationEnglish });
       } else {
-        if (currentTime < 4 && script.hook) {
-          setActiveSubtitle({ burmese: script.hook, english: script.hook });
-        } else {
-          setActiveSubtitle(null);
-        }
+        setActiveSubtitle(currentTime < 4 && script.hook ? { burmese: script.hook, english: script.hook } : null);
       }
     }, [currentTime, script, speechSegments]);
 
     useEffect(() => {
       if (!antiCopyright.freezeIntervalSec || antiCopyright.freezeIntervalSec <= 0) return;
       const currentIntSecond = Math.floor(currentTime);
-      if (
-        currentIntSecond > 0 &&
-        currentIntSecond % antiCopyright.freezeIntervalSec === 0 &&
-        lastFreezeCheckRef.current !== currentIntSecond &&
-        isPlaying && !isFreezing
-      ) {
+      if (currentIntSecond > 0 && currentIntSecond % antiCopyright.freezeIntervalSec === 0 && lastFreezeCheckRef.current !== currentIntSecond && isPlaying && !isFreezing) {
         lastFreezeCheckRef.current = currentIntSecond;
         setIsFreezing(true);
         if (videoRef.current) videoRef.current.pause();
-        
         if (freezeTimeoutRef.current) clearTimeout(freezeTimeoutRef.current);
         freezeTimeoutRef.current = setTimeout(() => {
           setIsFreezing(false);
           if (videoRef.current && isPlaying) videoRef.current.play().catch(()=>{});
         }, antiCopyright.freezeDurationSec * 1000);
       }
-    }, [currentTime, antiCopyright.freezeIntervalSec, antiCopyright.freezeDurationSec, isPlaying, isFreezing]);
+    }, [currentTime, antiCopyright, isPlaying, isFreezing]);
 
     useEffect(() => {
       let animationFrameId: number;
@@ -229,17 +195,14 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
       if (!v || !c) return;
       const ctx = c.getContext('2d');
       if (!ctx) return;
-
       let needsSingleRender = true;
 
       const render = (time: number) => {
-        if (!isPlaying && !isFreezing && !needsSingleRender && dragState.item === 'none') {
-           animationFrameId = requestAnimationFrame(render);
-           return;
+        if (!isPlaying && !isFreezing && !needsSingleRender) {
+           animationFrameId = requestAnimationFrame(render); return;
         }
         if (time - lastRenderTimeRef.current < frameInterval) {
-           animationFrameId = requestAnimationFrame(render);
-           return; 
+           animationFrameId = requestAnimationFrame(render); return; 
         }
         lastRenderTimeRef.current = time;
         needsSingleRender = false;
@@ -250,133 +213,122 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
 
           ctx.clearRect(0, 0, width, height);
           ctx.save();
-
-          if (antiCopyright.flipHorizontal) {
-            ctx.translate(width, 0);
-            ctx.scale(-1, 1);
-          }
-          
-          if (antiCopyright.microZoom) {
-            const scale = 1.05;
-            const dw = width * scale;
-            const dh = height * scale;
-            const dx = (width - dw) / 2;
-            const dy = (height - dh) / 2;
-            ctx.drawImage(v, dx, dy, dw, dh);
-          } else {
-            ctx.drawImage(v, 0, 0, width, height);
-          }
+          if (antiCopyright.flipHorizontal) { ctx.translate(width, 0); ctx.scale(-1, 1); }
+          ctx.drawImage(v, 0, 0, width, height);
           ctx.restore();
 
-          // Blur Rendering
-          if (localBlur?.enabled) {
-            const bPx = localBlur.blurPx || 14;
-            if (localBlur.position === 'full-background') {
-               ctx.save(); ctx.filter = `blur(${bPx}px)`; ctx.drawImage(v, 0, 0, width, height); ctx.restore();
-            } else if (localBlur.position === 'top-bar') {
-               const bH = Math.round(height * 0.22);
-               ctx.save(); ctx.filter = `blur(${bPx}px)`; ctx.drawImage(v, 0, 0, width, bH, 0, 0, width, bH); ctx.restore();
-            } else if (localBlur.position === 'bottom-bar') {
-               const bY = Math.round((height * (localBlur.boxY || 75)) / 100);
-               const bH = Math.round((height * (localBlur.boxHeight || 25)) / 100);
-               ctx.save(); ctx.filter = `blur(${bPx}px)`; ctx.drawImage(v, 0, bY, width, bH, 0, bY, width, bH); ctx.restore();
-            } else if (localBlur.position === 'custom-box') {
-               const bX = Math.round((width * (localBlur.boxX || 0)) / 100);
-               const bY = Math.round((height * (localBlur.boxY || 70)) / 100);
-               const bW = Math.round((width * (localBlur.boxWidth || 100)) / 100);
-               const bH = Math.round((height * (localBlur.boxHeight || 25)) / 100);
-               ctx.save(); ctx.filter = `blur(${bPx}px)`; ctx.drawImage(v, bX, bY, bW, bH, bX, bY, bW, bH); ctx.restore();
-               
-               if (!isPlaying || dragState.item === 'blur-box' || dragState.item === 'blur-resize') {
-                 ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 4; ctx.setLineDash([10, 10]);
-                 ctx.strokeRect(bX, bY, bW, bH);
-                 ctx.fillStyle = '#38bdf8';
-                 ctx.fillRect(bX + bW - 20, bY + bH - 20, 20, 20); // Resize Handle
-                 ctx.setLineDash([]);
-               }
-            }
+          // Blur Custom Box Rendering
+          if (blurSettings?.enabled && blurSettings.position === 'custom-box') {
+             const bPx = blurSettings.blurPx || 14;
+             const bX = Math.round((width * (blurSettings.boxX || 0)) / 100);
+             const bY = Math.round((height * (blurSettings.boxY || 70)) / 100);
+             const bW = Math.round((width * (blurSettings.boxWidth || 100)) / 100);
+             const bH = Math.round((height * (blurSettings.boxHeight || 25)) / 100);
+             ctx.save(); ctx.filter = `blur(${bPx}px)`; ctx.drawImage(v, bX, bY, bW, bH, bX, bY, bW, bH); ctx.restore();
+             
+             if (!isPlaying) {
+               ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 4; ctx.setLineDash([10, 10]);
+               ctx.strokeRect(bX, bY, bW, bH);
+               ctx.setLineDash([]);
+             }
           }
 
-          if (antiCopyright.colorGradeFilter === 'cinematic') {
-            ctx.fillStyle = 'rgba(15, 30, 60, 0.08)'; ctx.fillRect(0, 0, width, height);
-          } else if (antiCopyright.colorGradeFilter === 'warm') {
-            ctx.fillStyle = 'rgba(60, 35, 10, 0.08)'; ctx.fillRect(0, 0, width, height);
-          } else if (antiCopyright.colorGradeFilter === 'matrix') {
-            ctx.fillStyle = 'rgba(10, 60, 30, 0.08)'; ctx.fillRect(0, 0, width, height);
-          }
-
-          if (isFreezing) {
-            ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)'; ctx.lineWidth = 6; ctx.strokeRect(6, 6, width - 12, height - 12);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'; ctx.fillRect(14, 14, 250, 38);
-            ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#f87171'; ctx.fillText('⚡ 5s COPYRIGHT FREEZE', 26, 38);
-          }
-
-          // Subtitles
+          // Smart Subtitles (Auto Word Wrap)
           if (antiCopyright.subtitlesEnabled && activeSubtitle) {
-            const fontSizePx = localSubtitle.fontSize === 'huge' ? 42 : localSubtitle.fontSize === 'large' ? 34 : localSubtitle.fontSize === 'medium' ? 26 : 20;
-            const subBoxHeight = (localSubtitle.showBurmese && localSubtitle.showEnglish) ? fontSizePx * 3 : fontSizePx * 2;
-            
-            let yPos = Math.round((height * (localSubtitle.customYPercent || 82)) / 100);
+            const fontSizePx = subtitleSettings.fontSize === 'huge' ? 46 : subtitleSettings.fontSize === 'large' ? 36 : subtitleSettings.fontSize === 'medium' ? 28 : 22;
+            const maxTextWidth = width * 0.90; // Allow 90% of screen width
 
-            if (localSubtitle.boxedBackground) {
+            ctx.font = `bold ${fontSizePx}px sans-serif`;
+            const burmeseLines = subtitleSettings.showBurmese ? wrapText(ctx, activeSubtitle.burmese, maxTextWidth) : [];
+            
+            ctx.font = `bold ${Math.round(fontSizePx * 0.8)}px sans-serif`;
+            const englishLines = subtitleSettings.showEnglish ? wrapText(ctx, activeSubtitle.english, maxTextWidth) : [];
+
+            const totalLines = burmeseLines.length + englishLines.length;
+            const lineHeight = fontSizePx * 1.4;
+            const subBoxHeight = (totalLines * lineHeight) + 20;
+            
+            // Subtitle Y Position
+            let yPos = Math.round((height * (subtitleSettings.customYPercent || 80)) / 100);
+
+            if (subtitleSettings.boxedBackground) {
               ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-              const boxW = width * 0.92;
+              const boxW = maxTextWidth + 40;
               const boxX = (width - boxW) / 2;
-              ctx.roundRect ? ctx.roundRect(boxX, yPos - (fontSizePx*1.2), boxW, subBoxHeight, 10) : ctx.fillRect(boxX, yPos - (fontSizePx*1.2), boxW, subBoxHeight);
+              const boxY = yPos - fontSizePx;
+              ctx.roundRect ? ctx.roundRect(boxX, boxY, boxW, subBoxHeight, 12) : ctx.fillRect(boxX, boxY, boxW, subBoxHeight);
               ctx.fill();
-              
-              if (!isPlaying || dragState.item === 'subtitle') {
-                 ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 4; ctx.setLineDash([8, 8]);
-                 ctx.strokeRect(boxX, yPos - (fontSizePx*1.2), boxW, subBoxHeight);
-                 ctx.setLineDash([]);
-              }
             }
 
-            const textColor = localSubtitle.color === 'yellow' ? '#fde047' : localSubtitle.color === 'cyan' ? '#38bdf8' : localSubtitle.color === 'green' ? '#4ade80' : localSubtitle.color === 'pink' ? '#fb7185' : '#ffffff';
+            const textColor = subtitleSettings.color === 'yellow' ? '#fde047' : subtitleSettings.color === 'cyan' ? '#38bdf8' : subtitleSettings.color === 'green' ? '#4ade80' : subtitleSettings.color === 'pink' ? '#fb7185' : '#ffffff';
             ctx.textAlign = 'center';
 
-            if (localSubtitle.showBurmese) {
-              ctx.font = `bold ${fontSizePx}px sans-serif`; ctx.fillStyle = textColor;
-              ctx.fillText(activeSubtitle.burmese.slice(0, 70), width / 2, yPos);
+            let currentTextY = yPos;
+
+            // Draw Burmese Lines
+            if (subtitleSettings.showBurmese) {
+              ctx.font = `bold ${fontSizePx}px sans-serif`;
+              ctx.fillStyle = textColor;
+              burmeseLines.forEach(line => {
+                ctx.fillText(line, width / 2, currentTextY);
+                currentTextY += lineHeight;
+              });
             }
-            if (localSubtitle.showEnglish) {
-              ctx.font = `bold ${Math.round(fontSizePx * 0.75)}px sans-serif`; ctx.fillStyle = '#f1f5f9';
-              ctx.fillText(activeSubtitle.english.slice(0, 80), width / 2, yPos + (localSubtitle.showBurmese ? fontSizePx + 10 : 0));
+
+            // Draw English Lines
+            if (subtitleSettings.showEnglish) {
+              ctx.font = `bold ${Math.round(fontSizePx * 0.8)}px sans-serif`;
+              ctx.fillStyle = '#f1f5f9';
+              englishLines.forEach(line => {
+                ctx.fillText(line, width / 2, currentTextY - (fontSizePx*0.2));
+                currentTextY += (lineHeight * 0.8);
+              });
             }
           }
 
-          // Custom Logo / Typed Text / Badge
-          if (localIcon?.enabled) {
-            const iSize = localIcon.size || 50;
-            let iX = Math.round((width * (localIcon.customX || 85)) / 100);
-            let iY = Math.round((height * (localIcon.customY || 10)) / 100);
+          // Custom Logo / Badge / Typed Text
+          if (iconSettings?.enabled) {
+            const iSize = iconSettings.size || 50;
+            let iX = Math.round((width * (iconSettings.customX || 85)) / 100);
+            let iY = Math.round((height * (iconSettings.customY || 10)) / 100);
 
             ctx.save();
-            ctx.globalAlpha = localIcon.opacity || 0.9;
+            ctx.globalAlpha = iconSettings.opacity || 0.9;
             
-            if (!isPlaying || dragState.item === 'logo') {
+            if (!isPlaying) {
                ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]);
                ctx.strokeRect(iX - 5, iY - 5, iSize + 10, iSize + 10);
                ctx.setLineDash([]);
             }
 
-            if (localIcon.type === 'custom' && customIconImgRef.current) {
-              // Draw uploaded image
+            if (iconSettings.type === 'custom' && customIconImgRef.current) {
+              // User uploaded Image
               ctx.drawImage(customIconImgRef.current, iX, iY, iSize, iSize);
-            } else {
-              // Draw typed Custom Watermark text as Logo fallback
-              const text = antiCopyright.customWatermark || 'MovieRecap Studio';
-              ctx.font = `bold ${iSize * 0.4}px sans-serif`; 
-              
-              // Add a nice background box for the text so it's visible
+            } 
+            else if (iconSettings.type === 'text' || (iconSettings as any).type === 'text') {
+              // NEW: User typed Text Logo
+              const text = (iconSettings as any).customText || 'MovieRecap';
+              ctx.font = `bold ${iSize * 0.5}px sans-serif`; 
               const textWidth = ctx.measureText(text).width;
-              ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-              ctx.roundRect ? ctx.roundRect(iX, iY, textWidth + 20, iSize, 8) : ctx.fillRect(iX, iY, textWidth + 20, iSize);
+              
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+              ctx.roundRect ? ctx.roundRect(iX, iY, textWidth + 30, iSize, 8) : ctx.fillRect(iX, iY, textWidth + 30, iSize);
               ctx.fill();
 
               ctx.fillStyle = '#ffffff'; 
               ctx.textAlign = 'left';
-              ctx.fillText(text, iX + 10, iY + (iSize * 0.65));
+              ctx.fillText(text, iX + 15, iY + (iSize * 0.65));
+            } 
+            else {
+              // Preset Badges
+              const badgeW = Math.max(100, iSize * 1.8);
+              const badgeH = Math.max(30, iSize * 0.6);
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+              ctx.roundRect ? ctx.roundRect(iX, iY, badgeW, badgeH, 6) : ctx.fillRect(iX, iY, badgeW, badgeH);
+              ctx.fill();
+              ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2; ctx.stroke();
+              ctx.font = `bold ${iSize * 0.25}px sans-serif`; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center';
+              ctx.fillText('🎬 RECAP HD', iX + badgeW / 2, iY + badgeH / 2 + (iSize*0.1));
             }
             ctx.restore();
           }
@@ -386,96 +338,11 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
 
       animationFrameId = requestAnimationFrame(render);
       return () => { cancelAnimationFrame(animationFrameId); };
-    }, [antiCopyright, isFreezing, activeSubtitle, localSubtitle, localBlur, localIcon, isPlaying, videoSize, dragState]);
-
-    // --- NEW: TOUCH-SAFE DRAG AND DROP HANDLERS ---
-    const getEventPos = (e: React.PointerEvent) => {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-      return { x, y };
-    };
-
-    const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (isPlaying) return; 
-      
-      // CRITICAL FOR MOBILE: Capture pointer to prevent browser scroll/pull-to-refresh
-      e.currentTarget.setPointerCapture(e.pointerId);
-
-      const { x, y } = getEventPos(e);
-      
-      // 1. Blur Box
-      if (localBlur.enabled && localBlur.position === 'custom-box') {
-        const bx = localBlur.boxX || 0; const by = localBlur.boxY || 70;
-        const bw = localBlur.boxWidth || 100; const bh = localBlur.boxHeight || 25;
-        if (x > bx + bw - 10 && x <= bx + bw + 10 && y > by + bh - 10 && y <= by + bh + 10) {
-          setDragState({ item: 'blur-resize', startX: x, startY: y, initialValX: bw, initialValY: bh });
-          return;
-        }
-        if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
-          setDragState({ item: 'blur-box', startX: x, startY: y, initialValX: bx, initialValY: by });
-          return;
-        }
-      }
-
-      // 2. Logo/Watermark text
-      if (localIcon.enabled) {
-         const ix = localIcon.customX || 85; const iy = localIcon.customY || 10;
-         const sizePct = (localIcon.size / videoSize.width) * 100;
-         if (x >= ix - 5 && x <= ix + sizePct * 3 && y >= iy - 5 && y <= iy + sizePct + 5) {
-            setDragState({ item: 'logo', startX: x, startY: y, initialValX: ix, initialValY: iy });
-            return;
-         }
-      }
-
-      // 3. Subtitles
-      if (antiCopyright.subtitlesEnabled && activeSubtitle) {
-         const sy = localSubtitle.customYPercent || 82;
-         if (y >= sy - 20 && y <= sy + 20) { 
-            setDragState({ item: 'subtitle', startX: x, startY: y, initialValX: 0, initialValY: sy });
-            return;
-         }
-      }
-    };
-
-    const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (dragState.item === 'none') return;
-      const { x, y } = getEventPos(e);
-      const dx = x - dragState.startX;
-      const dy = y - dragState.startY;
-
-      if (dragState.item === 'logo') {
-         const newX = Math.max(0, Math.min(100, dragState.initialValX + dx));
-         const newY = Math.max(0, Math.min(100, dragState.initialValY + dy));
-         setLocalIcon({ ...localIcon, position: 'custom', customX: newX, customY: newY });
-      } 
-      else if (dragState.item === 'subtitle') {
-         const newY = Math.max(5, Math.min(95, dragState.initialValY + dy));
-         setLocalSubtitle({ ...localSubtitle, position: 'custom', customYPercent: newY });
-      }
-      else if (dragState.item === 'blur-box') {
-         const newX = Math.max(0, Math.min(100 - (localBlur.boxWidth || 100), dragState.initialValX + dx));
-         const newY = Math.max(0, Math.min(100 - (localBlur.boxHeight || 25), dragState.initialValY + dy));
-         setLocalBlur({ ...localBlur, boxX: newX, boxY: newY });
-      }
-      else if (dragState.item === 'blur-resize') {
-         const newW = Math.max(10, Math.min(100 - (localBlur.boxX || 0), dragState.initialValX + dx));
-         const newH = Math.max(10, Math.min(100 - (localBlur.boxY || 0), dragState.initialValY + dy));
-         setLocalBlur({ ...localBlur, boxWidth: newW, boxHeight: newH });
-      }
-    };
-
-    const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      e.currentTarget.releasePointerCapture(e.pointerId); // Release lock
-      if (dragState.item === 'logo' && onUpdateIconSettings) onUpdateIconSettings(localIcon);
-      if (dragState.item === 'subtitle' && onUpdateSubtitleSettings) onUpdateSubtitleSettings(localSubtitle);
-      if ((dragState.item === 'blur-box' || dragState.item === 'blur-resize') && onUpdateBlurSettings) onUpdateBlurSettings(localBlur);
-      setDragState({ item: 'none', startX: 0, startY: 0, initialValX: 0, initialValY: 0 });
-    };
+    }, [antiCopyright, isFreezing, activeSubtitle, subtitleSettings, blurSettings, iconSettings, isPlaying, videoSize]);
 
     const handlePlayPause = async () => {
       const v = videoRef.current;
-      if (!v || dragState.item !== 'none') return;
+      if (!v) return;
       if (isPlaying) {
         v.pause();
         if (voiceAudioRef.current) voiceAudioRef.current.pause();
@@ -491,10 +358,6 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
           setIsPlaying(false);
         }
       }
-    };
-
-    const toggleFullscreen = () => {
-      setIsFullscreen(!isFullscreen);
     };
 
     return (
@@ -531,24 +394,13 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
             ref={canvasRef}
             width={videoSize.width}
             height={videoSize.height}
-            className={`w-full h-full object-contain touch-none select-none ${!isPlaying ? 'cursor-grab active:cursor-grabbing' : ''}`}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
+            className="w-full h-full object-contain cursor-pointer"
+            onClick={handlePlayPause}
           />
-
-          {!isPlaying && dragState.item === 'none' && (
-            <div
-              onClick={handlePlayPause}
-              className="absolute inset-0 bg-black/10 flex items-center justify-center cursor-pointer hover:bg-black/20"
-            >
+          {!isPlaying && (
+            <div onClick={handlePlayPause} className="absolute inset-0 bg-black/10 flex items-center justify-center cursor-pointer hover:bg-black/20">
               <div className="w-16 h-16 rounded-full bg-rose-600/90 text-white flex items-center justify-center shadow-xl transform hover:scale-110 transition-transform">
                 <Play className="w-8 h-8 fill-current translate-x-0.5" />
-              </div>
-              <div className="absolute top-4 bg-slate-900/80 text-white text-xs px-3 py-1.5 rounded-full flex items-center space-x-1.5 border border-slate-700">
-                <Move className="w-3.5 h-3.5 text-amber-400" />
-                <span>Logo၊ Blur၊ စာတန်းများကို လက်ဖြင့် ဖိဆွဲပြီး နေရာရွှေ့ပါ (Pause ထားချိန်သာ ရမည်)</span>
               </div>
             </div>
           )}
@@ -583,13 +435,12 @@ export const RecapVideoPlayer = forwardRef<RecapVideoPlayerRef, RecapVideoPlayer
                 </button>
              </div>
 
-             {/* Fullscreen Toggle Button */}
              <button 
-                onClick={toggleFullscreen}
-                className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold flex items-center space-x-1.5 hover:bg-amber-500/30 transition-colors"
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold flex items-center space-x-1.5 hover:bg-slate-700 transition-colors"
              >
                 {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-                <span className="hidden sm:inline">{isFullscreen ? 'ပုံမှန်အနေအထားသို့ (Exit Fullscreen)' : 'မျက်နှာပြင်ချဲ့ရန် (Fullscreen Edit)'}</span>
+                <span className="hidden sm:inline">{isFullscreen ? 'ပုံမှန်အနေအထားသို့' : 'မျက်နှာပြင်ချဲ့ရန်'}</span>
              </button>
           </div>
         </div>
