@@ -123,6 +123,22 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
     a.onended = () => setPlayingSegmentId(null); a.play().catch(() => setPlayingSegmentId(null));
   };
 
+  // NEW: Handle Custom Logo Image Upload
+  const handleIconFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const url = event.target?.result as string;
+      onIconSettingsChange({
+        ...iconSettings,
+        type: 'custom',
+        customImageUrl: url,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 sm:p-6 backdrop-blur-xl shadow-2xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
@@ -221,31 +237,40 @@ export const VideoDubbingTranslator: React.FC<VideoDubbingTranslatorProps> = ({
             )}
           </div>
 
-          {/* 2. LOGO / TEXT SETTINGS */}
+          {/* 2. LOGO / IMAGE UPLOAD SETTINGS */}
           <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-200 flex items-center space-x-2">
-                <ImageIcon className="w-4 h-4 text-amber-400" /><span>Video Logo / စာသား ထည့်ရန်</span>
+                <ImageIcon className="w-4 h-4 text-amber-400" /><span>Video Logo / ဓာတ်ပုံ ထည့်ရန်</span>
               </label>
               <input type="checkbox" checked={iconSettings.enabled} onChange={(e) => onIconSettingsChange({ ...iconSettings, enabled: e.target.checked })} className="w-4 h-4 rounded" />
             </div>
             {iconSettings.enabled && (
               <div className="space-y-4 pt-2 text-xs">
                 <div className="flex gap-2">
-                   <button onClick={()=>onIconSettingsChange({...iconSettings, type: 'preset'})} className={`flex-1 p-2 rounded border ${iconSettings.type==='preset' ? 'border-amber-500 bg-amber-500/20 text-amber-300':'border-slate-700'}`}>Preset Icon</button>
-                   <button onClick={()=>onIconSettingsChange({...(iconSettings as any), type: 'text'})} className={`flex-1 p-2 rounded border ${(iconSettings as any).type==='text' ? 'border-amber-500 bg-amber-500/20 text-amber-300':'border-slate-700'}`}>ကိုယ်ပိုင်စာသား (Text)</button>
+                   <button onClick={()=>onIconSettingsChange({...iconSettings, type: 'preset'})} className={`flex-1 p-2 rounded border ${iconSettings.type==='preset' ? 'border-amber-500 bg-amber-500/20 text-amber-300':'border-slate-700'}`}>Preset Badge</button>
+                   <button onClick={()=>onIconSettingsChange({...iconSettings, type: 'custom'})} className={`flex-1 p-2 rounded border ${iconSettings.type==='custom' ? 'border-amber-500 bg-amber-500/20 text-amber-300':'border-slate-700'}`}>ကိုယ်ပိုင် Logo (Upload)</button>
                 </div>
 
-                {/* TEXT INPUT (NEW) */}
-                {(iconSettings as any).type === 'text' && (
-                   <input type="text" placeholder="ဥပမာ: MovieRecap Studio" 
-                     value={(iconSettings as any).customText || ''}
-                     onChange={(e) => onIconSettingsChange({ ...iconSettings, type: 'text' as any, customText: e.target.value } as any)}
-                     className="w-full bg-slate-900 border border-amber-500/50 rounded-lg p-2 text-white placeholder-slate-500"
-                   />
+                {/* IMAGE UPLOAD UI (NEW) */}
+                {iconSettings.type === 'custom' && (
+                   <div className="flex flex-col items-center justify-center p-4 border border-dashed border-slate-700 rounded-xl bg-slate-900/50">
+                     <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg flex items-center space-x-2 text-xs font-bold transition-colors">
+                        <ImageIcon className="w-4 h-4 text-amber-400" />
+                        <span>ပုံရွေးချယ်ရန် (Upload Image)</span>
+                        <input type="file" accept="image/png, image/jpeg, image/webp" onChange={handleIconFileUpload} className="hidden" />
+                     </label>
+                     {iconSettings.customImageUrl && (
+                        <span className="text-[10px] text-emerald-400 mt-2 font-bold">✓ ပုံထည့်သွင်းပြီးပါပြီ</span>
+                     )}
+                   </div>
                 )}
 
-                <div className="flex items-center justify-center pt-2">
+                <div className="flex flex-col items-center justify-center pt-2">
+                   <div className="w-full flex items-center justify-between text-slate-400 mb-2">
+                      <span>Logo အရွယ်အစား: {iconSettings.size || 50}px</span>
+                      <input type="range" min="30" max="150" value={iconSettings.size || 50} onChange={(e) => onIconSettingsChange({...iconSettings, size: parseInt(e.target.value)})} className="w-1/2 accent-amber-500" />
+                   </div>
                    {/* Logo Position D-Pad */}
                    <DPadControl label="Logo နေရာရွှေ့ရန်" onMove={(dx, dy) => onIconSettingsChange({ ...iconSettings, position: 'custom', customX: Math.max(0, (iconSettings.customX || 85) + dx), customY: Math.max(0, (iconSettings.customY || 10) + dy) })} />
                 </div>
